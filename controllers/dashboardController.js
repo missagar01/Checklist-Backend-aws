@@ -28,30 +28,22 @@ export const getDashboardData = async (req, res) => {
       taskView = "recent",
     } = req.query;
 
-    const table = dashboardType;
     const offset = (page - 1) * limit;
-
     const { firstDayStr, currentDayStr } = getCurrentMonthRange();
 
-    let query = `SELECT * FROM ${table} WHERE 1=1`;
+    let query = `SELECT * FROM ${dashboardType} WHERE 1=1`;
 
-    // ---------------------------
-    // ROLE FILTER (USER) ✅ TRIM FIX
-    // ---------------------------
+    // USER FILTER
     if (role === "user" && username) {
       query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
-    // ---------------------------
-    // ADMIN STAFF FILTER
-    // ---------------------------
+    // ADMIN STAFF FILTER ✅ FIX
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${staffFilter}'))`;
     }
 
-    // ---------------------------
     // DEPARTMENT FILTER
-    // ---------------------------
     if (dashboardType === "checklist" && departmentFilter !== "all") {
       query += ` AND LOWER(department) = LOWER('${departmentFilter}')`;
     }
@@ -102,12 +94,12 @@ export const getTotalTask = async (req, res) => {
       AND task_start_date <= '${currentDayStr} 23:59:59'
     `;
 
-    if (role === "user" && username) {
+   if (role === "user" && username) {
       query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${staffFilter}'))`;
     }
 
     if (dashboardType === "checklist" && departmentFilter !== "all") {
@@ -135,7 +127,8 @@ export const getCompletedTask = async (req, res) => {
     `;
 
     if (dashboardType === "checklist") {
-      query += ` AND status = 'yes'`;
+      // query += ` AND status = 'yes'`;
+      query += ` AND submission_date IS NOT NULL`;
     } else {
       query += ` AND submission_date IS NOT NULL`;
     }
@@ -145,7 +138,9 @@ export const getCompletedTask = async (req, res) => {
     }
 
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      // query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${staffFilter}'))`;
+
     }
 
     if (dashboardType === "checklist" && departmentFilter !== "all") {
@@ -171,12 +166,13 @@ export const getPendingTask = async (req, res) => {
       AND submission_date IS NULL
     `;
 
+    
     if (role === "user" && username) {
       query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${staffFilter}'))`;
     }
 
     if (dashboardType === "checklist" && departmentFilter !== "all") {
@@ -204,13 +200,13 @@ export const getOverdueTask = async (req, res) => {
       AND submission_date IS NULL
     `;
 
-    if (role === "user" && username) {
+     if (role === "user" && username) {
       query += ` AND TRIM(LOWER(name)) = TRIM(LOWER($${idx++}))`;
       params.push(username);
     }
 
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER($${idx++})`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER($${idx++}))`;
       params.push(staffFilter);
     }
 
@@ -526,19 +522,19 @@ export const getDashboardDataCount = async (req, res) => {
     `;
 
     // ROLE FILTER (USER)
-    if (role === "user" && username) {
-      query += ` AND LOWER(name) = LOWER('${username}')`;
+   if (role === "user" && username) {
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
-    // ADMIN STAFF FILTER
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${staffFilter}'))`;
     }
 
-    // DEPARTMENT FILTER (checklist only)
     if (dashboardType === "checklist" && departmentFilter !== "all") {
       query += ` AND LOWER(department) = LOWER('${departmentFilter}')`;
     }
+
+
 
     // TASK VIEW LOGIC
     if (taskView === "recent") {
