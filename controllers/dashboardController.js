@@ -25,22 +25,21 @@ export const getDashboardData = async (req, res) => {
       departmentFilter,
       role,
       username,
-      taskView = "recent"
+      taskView = "recent",
     } = req.query;
 
     const table = dashboardType;
     const offset = (page - 1) * limit;
-    
-    // Get current month range
+
     const { firstDayStr, currentDayStr } = getCurrentMonthRange();
 
     let query = `SELECT * FROM ${table} WHERE 1=1`;
 
     // ---------------------------
-    // ROLE FILTER (USER)
+    // ROLE FILTER (USER) ✅ TRIM FIX
     // ---------------------------
     if (role === "user" && username) {
-      query += ` AND LOWER(name) = LOWER('${username}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
     // ---------------------------
@@ -61,58 +60,30 @@ export const getDashboardData = async (req, res) => {
     // TASK VIEW FILTERS
     // ---------------------------
     if (taskView === "recent") {
-      // TODAY TASKS
-      query += `
-        AND task_start_date::date = CURRENT_DATE
-      `;
-
-      // For checklist: status is enum 'yes'/'no', compare directly
+      query += ` AND task_start_date::date = CURRENT_DATE`;
       if (dashboardType === "checklist") {
-        // query += ` AND (status IS NULL OR status <> 'yes')`;
         query += ` AND submission_date IS NULL`;
       }
-    }
-    else if (taskView === "upcoming") {
-      // TOMORROW TASKS - Use the exact query that works in DB
-      query += `
-        AND task_start_date::date = (CURRENT_DATE + INTERVAL '1 day')::date
-      `;
-      
-      // For checklist: exclude completed tasks
+    } else if (taskView === "upcoming") {
+      query += ` AND task_start_date::date = (CURRENT_DATE + INTERVAL '1 day')::date`;
       if (dashboardType === "checklist") {
-        // query += ` AND (status IS NULL OR status <> 'yes')`;
         query += ` AND submission_date IS NULL`;
       }
-    }
-    else if (taskView === "overdue") {
-      // PAST DUE + NOT COMPLETED
-      query += `
-        AND task_start_date::date < CURRENT_DATE
-      `;
-
-      if (dashboardType === "checklist") {
-        // query += ` AND (status IS NULL OR status <> 'yes')`;
-        query += ` AND submission_date IS NULL`;
-      } else {
-        query += ` AND submission_date IS NULL`;
-      }
-    }
-    else if (taskView === "all") {
-      // ALL TASKS IN CURRENT MONTH
+    } else if (taskView === "overdue") {
+      query += ` AND task_start_date::date < CURRENT_DATE AND submission_date IS NULL`;
+    } else if (taskView === "all") {
       query += `
         AND task_start_date >= '${firstDayStr} 00:00:00'
         AND task_start_date <= '${currentDayStr} 23:59:59'
       `;
     }
 
-    // ORDER + PAGINATION
     query += ` ORDER BY task_start_date ASC LIMIT ${limit} OFFSET ${offset}`;
 
     log("FINAL QUERY =>", query);
 
     const result = await pool.query(query);
     res.json(result.rows);
-
   } catch (err) {
     console.error("ERROR in getDashboardData:", err);
     res.status(500).send("Error fetching dashboard data");
@@ -122,32 +93,25 @@ export const getDashboardData = async (req, res) => {
 export const getTotalTask = async (req, res) => {
   try {
     const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
-
-    const table = dashboardType;
-    
-    // Get current month range
     const { firstDayStr, currentDayStr } = getCurrentMonthRange();
 
     let query = `
       SELECT COUNT(*) AS count
-      FROM ${table}
+      FROM ${dashboardType}
       WHERE task_start_date >= '${firstDayStr} 00:00:00'
       AND task_start_date <= '${currentDayStr} 23:59:59'
     `;
 
-    // ROLE FILTER
     if (role === "user" && username) {
-      query += ` AND LOWER(name)=LOWER('${username}')`;
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
     }
 
-    // STAFF FILTER (admin only)
     if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name)=LOWER('${staffFilter}')`;
+      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
     }
 
-    // DEPARTMENT FILTER (checklist only)
     if (dashboardType === "checklist" && departmentFilter !== "all") {
-      query += ` AND LOWER(department)=LOWER('${departmentFilter}')`;
+      query += ` AND LOWER(department) = LOWER('${departmentFilter}')`;
     }
 
     const result = await pool.query(query);
@@ -161,29 +125,32 @@ export const getTotalTask = async (req, res) => {
 export const getCompletedTask = async (req, res) => {
   try {
     const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
-
-    const table = dashboardType;
-    
-    // Get current month range
     const { firstDayStr, currentDayStr } = getCurrentMonthRange();
 
     let query = `
       SELECT COUNT(*) AS count
-      FROM ${table}
+      FROM ${dashboardType}
       WHERE task_start_date >= '${firstDayStr} 00:00:00'
       AND task_start_date <= '${currentDayStr} 23:59:59'
     `;
 
     if (dashboardType === "checklist") {
-      query += ` AND status = 'yes' `;
+      query += ` AND status = 'yes'`;
     } else {
-      query += ` AND submission_date IS NOT NULL `;
+      query += ` AND submission_date IS NOT NULL`;
     }
 
-    if (role === "user" && username) query += ` AND LOWER(name)=LOWER('${username}')`;
-    if (role === "admin" && staffFilter !== "all") query += ` AND LOWER(name)=LOWER('${staffFilter}')`;
-    if (dashboardType === "checklist" && departmentFilter !== "all")
-      query += ` AND LOWER(department)=LOWER('${departmentFilter}')`;
+    if (role === "user" && username) {
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
+    }
+
+    if (role === "admin" && staffFilter !== "all") {
+      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+    }
+
+    if (dashboardType === "checklist" && departmentFilter !== "all") {
+      query += ` AND LOWER(department) = LOWER('${departmentFilter}')`;
+    }
 
     const result = await pool.query(query);
     res.json(Number(result.rows[0].count));
@@ -193,74 +160,72 @@ export const getCompletedTask = async (req, res) => {
   }
 };
 
-// export const getPendingTask = async (req, res) => {
-//   try {
-//     const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
-
-//     const table = dashboardType;
-    
-//     // Get current month range
-//     const { firstDayStr, currentDayStr } = getCurrentMonthRange();
-
-//     let query = `
-//       SELECT COUNT(*) AS count
-//       FROM ${table}
-//       WHERE task_start_date >= '${firstDayStr} 00:00:00'
-//       AND task_start_date <= '${currentDayStr} 23:59:59'
-//       AND submission_date IS NULL
-//     `;
-
-//     if (dashboardType === "checklist") {
-//       query += ` AND (status IS NULL OR status <> 'yes') `;
-//     }
-
-//     if (role === "user" && username) query += ` AND LOWER(name)=LOWER('${username}')`;
-//     if (role === "admin" && staffFilter !== "all") query += ` AND LOWER(name)=LOWER('${staffFilter}')`;
-//     if (dashboardType === "checklist" && departmentFilter !== "all")
-//       query += ` AND LOWER(department)=LOWER('${departmentFilter}')`;
-
-//     const result = await pool.query(query);
-//     res.json(Number(result.rows[0].count));
-//   } catch (err) {
-//     console.error("PENDING ERROR:", err.message);
-//     res.status(500).json({ error: "Error fetching pending tasks" });
-//   }
-// };
-
-
 export const getPendingTask = async (req, res) => {
   try {
     const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
-    const table = dashboardType;
 
-    // Align with "recent" list logic: only today's tasks that are not submitted
     let query = `
       SELECT COUNT(*) AS count
-      FROM ${table}
+      FROM ${dashboardType}
       WHERE task_start_date::date = CURRENT_DATE
       AND submission_date IS NULL
     `;
 
-    // Role filter
-    if (role === "user" && username)
-      query += ` AND LOWER(name)=LOWER('${username}')`;
+    if (role === "user" && username) {
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER('${username}'))`;
+    }
 
-    if (role === "admin" && staffFilter !== "all")
-      query += ` AND LOWER(name)=LOWER('${staffFilter}')`;
+    if (role === "admin" && staffFilter !== "all") {
+      query += ` AND LOWER(name) = LOWER('${staffFilter}')`;
+    }
 
-    // Department filter
-    if (dashboardType === "checklist" && departmentFilter !== "all")
-      query += ` AND LOWER(department)=LOWER('${departmentFilter}')`;
+    if (dashboardType === "checklist" && departmentFilter !== "all") {
+      query += ` AND LOWER(department) = LOWER('${departmentFilter}')`;
+    }
 
     const result = await pool.query(query);
     res.json(Number(result.rows[0].count));
-
   } catch (err) {
     console.error("PENDING ERROR:", err.message);
     res.status(500).json({ error: "Error fetching pending tasks" });
   }
 };
 
+export const getOverdueTask = async (req, res) => {
+  try {
+    const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
+    const params = [];
+    let idx = 1;
+
+    let query = `
+      SELECT COUNT(*) AS count
+      FROM ${dashboardType}
+      WHERE task_start_date::date < CURRENT_DATE
+      AND submission_date IS NULL
+    `;
+
+    if (role === "user" && username) {
+      query += ` AND TRIM(LOWER(name)) = TRIM(LOWER($${idx++}))`;
+      params.push(username);
+    }
+
+    if (role === "admin" && staffFilter !== "all") {
+      query += ` AND LOWER(name) = LOWER($${idx++})`;
+      params.push(staffFilter);
+    }
+
+    if (dashboardType === "checklist" && departmentFilter !== "all") {
+      query += ` AND LOWER(department) = LOWER($${idx++})`;
+      params.push(departmentFilter);
+    }
+
+    const result = await pool.query(query, params);
+    res.json(Number(result.rows[0].count));
+  } catch (err) {
+    console.error("OVERDUE ERROR:", err.message);
+    res.status(500).json({ error: "Error fetching overdue tasks" });
+  }
+};
 
 export const getNotDoneTask = async (req, res) => {
   try {
@@ -300,47 +265,47 @@ export const getNotDoneTask = async (req, res) => {
   }
 };
 
-export const getOverdueTask = async (req, res) => {
-  try {
-    const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
+// export const getOverdueTask = async (req, res) => {
+//   try {
+//     const { dashboardType, staffFilter, departmentFilter, role, username } = req.query;
 
-    const table = dashboardType;
-    const params = [];
-    let idx = 1;
+//     const table = dashboardType;
+//     const params = [];
+//     let idx = 1;
 
-    // Align with task list overdue view: before today and not submitted
-    let query = `
-      SELECT COUNT(*) AS count
-      FROM ${table}
-      WHERE task_start_date::date < CURRENT_DATE
-      AND submission_date IS NULL
-    `;
+//     // Align with task list overdue view: before today and not submitted
+//     let query = `
+//       SELECT COUNT(*) AS count
+//       FROM ${table}
+//       WHERE task_start_date::date < CURRENT_DATE
+//       AND submission_date IS NULL
+//     `;
 
-    // Role filter
-    if (role === "user" && username) {
-      query += ` AND LOWER(name)=LOWER($${idx++})`;
-      params.push(username);
-    }
+//     // Role filter
+//     if (role === "user" && username) {
+//       query += ` AND LOWER(name)=LOWER($${idx++})`;
+//       params.push(username);
+//     }
 
-    if (role === "admin" && staffFilter !== "all") {
-      query += ` AND LOWER(name)=LOWER($${idx++})`;
-      params.push(staffFilter);
-    }
+//     if (role === "admin" && staffFilter !== "all") {
+//       query += ` AND LOWER(name)=LOWER($${idx++})`;
+//       params.push(staffFilter);
+//     }
 
-    // Department filter
-    if (dashboardType === "checklist" && departmentFilter !== "all") {
-      query += ` AND LOWER(department)=LOWER($${idx++})`;
-      params.push(departmentFilter);
-    }
+//     // Department filter
+//     if (dashboardType === "checklist" && departmentFilter !== "all") {
+//       query += ` AND LOWER(department)=LOWER($${idx++})`;
+//       params.push(departmentFilter);
+//     }
 
-    const result = await pool.query(query, params);
-    res.json(Number(result.rows[0].count));
+//     const result = await pool.query(query, params);
+//     res.json(Number(result.rows[0].count));
 
-  } catch (err) {
-    console.error("OVERDUE ERROR:", err.message);
-    res.status(500).json({ error: "Error fetching overdue tasks" });
-  }
-};
+//   } catch (err) {
+//     console.error("OVERDUE ERROR:", err.message);
+//     res.status(500).json({ error: "Error fetching overdue tasks" });
+//   }
+// };
 
 
 
