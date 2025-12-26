@@ -14,42 +14,58 @@ export const fetchChecklist = async (
     const params = [];
     let paramIndex = 1;
 
-    const hasDateRange = startDate && endDate;
-    if (hasDateRange) {
-      filters.push(`task_start_date >= $${paramIndex++}`);
-      params.push(`${startDate} 00:00:00`);
-      filters.push(`task_start_date <= $${paramIndex++}`);
-      params.push(`${endDate} 23:59:59`);
-    } else {
-      filters.push("task_start_date::date = CURRENT_DATE");
-    }
-
+    // If nameFilter is provided, show all tasks for that person (no date restriction)
+    // Otherwise, apply date filters
     if (nameFilter) {
       filters.push(`LOWER(name) = LOWER($${paramIndex++})`);
       params.push(nameFilter);
+    } else {
+      const hasDateRange = startDate && endDate;
+      if (hasDateRange) {
+        filters.push(`task_start_date >= $${paramIndex++}`);
+        params.push(`${startDate} 00:00:00`);
+        filters.push(`task_start_date <= $${paramIndex++}`);
+        params.push(`${endDate} 23:59:59`);
+      } else {
+        filters.push("task_start_date::date = CURRENT_DATE");
+      }
     }
 
     const whereClause = filters.join(" AND ");
 
+    // Use DISTINCT ON to get only unique tasks by name + task_description
+    // When filtering by name, show unique tasks (same name + description = 1 row)
     const dataQuery = `
-      SELECT *
+      SELECT DISTINCT ON (name, task_description) 
+        task_id, department, given_by, name, task_description, 
+        task_start_date, submission_date, frequency, 
+        enable_reminder, require_attachment, remark
       FROM checklist
       WHERE ${whereClause}
-      ORDER BY task_start_date ASC
+      ORDER BY name, task_description, task_start_date DESC
+    `;
+
+    // For pagination, we need to wrap the distinct query
+    const paginatedQuery = `
+      SELECT * FROM (${dataQuery}) AS unique_tasks
+      ORDER BY task_start_date DESC
       LIMIT $${paramIndex++}
       OFFSET $${paramIndex}
     `;
 
     const dataParams = [...params, pageSize, offset];
 
+    // Count unique combinations
     const countQuery = `
-      SELECT COUNT(*) AS count
-      FROM checklist
-      WHERE ${whereClause}
+      SELECT COUNT(*) AS count FROM (
+        SELECT DISTINCT ON (name, task_description) task_id
+        FROM checklist
+        WHERE ${whereClause}
+      ) AS unique_count
     `;
 
     const [dataRes, countRes] = await Promise.all([
-      pool.query(dataQuery, dataParams),
+      pool.query(paginatedQuery, dataParams),
       pool.query(countQuery, params),
     ]);
 
@@ -60,7 +76,6 @@ export const fetchChecklist = async (
     return { data: [], total: 0 };
   }
 };
-
 
 export const fetchDelegation = async (
   page = 0,
@@ -75,43 +90,58 @@ export const fetchDelegation = async (
     const params = [];
     let paramIndex = 1;
 
-    const hasDateRange = startDate && endDate;
-    if (hasDateRange) {
-      filters.push(`task_start_date >= $${paramIndex++}`);
-      params.push(`${startDate} 00:00:00`);
-      filters.push(`task_start_date <= $${paramIndex++}`);
-      params.push(`${endDate} 23:59:59`);
-    } else {
-      // Default to today's tasks when no explicit range is provided
-      filters.push("task_start_date::date = CURRENT_DATE");
-    }
-
+    // If nameFilter is provided, show all tasks for that person (no date restriction)
+    // Otherwise, apply date filters
     if (nameFilter) {
       filters.push(`LOWER(name) = LOWER($${paramIndex++})`);
       params.push(nameFilter);
+    } else {
+      const hasDateRange = startDate && endDate;
+      if (hasDateRange) {
+        filters.push(`task_start_date >= $${paramIndex++}`);
+        params.push(`${startDate} 00:00:00`);
+        filters.push(`task_start_date <= $${paramIndex++}`);
+        params.push(`${endDate} 23:59:59`);
+      } else {
+        // Default to today's tasks when no explicit range is provided
+        filters.push("task_start_date::date = CURRENT_DATE");
+      }
     }
 
     const whereClause = filters.join(" AND ");
 
+    // Use DISTINCT ON to get only unique tasks by name + task_description
     const dataQuery = `
-      SELECT *
+      SELECT DISTINCT ON (name, task_description) 
+        task_id, department, given_by, name, task_description, 
+        task_start_date, submission_date, frequency, 
+        enable_reminder, require_attachment, remark
       FROM delegation
       WHERE ${whereClause}
-      ORDER BY task_start_date ASC
+      ORDER BY name, task_description, task_start_date DESC
+    `;
+
+    // For pagination, wrap the distinct query
+    const paginatedQuery = `
+      SELECT * FROM (${dataQuery}) AS unique_tasks
+      ORDER BY task_start_date DESC
       LIMIT $${paramIndex++}
       OFFSET $${paramIndex}
     `;
 
     const dataParams = [...params, pageSize, offset];
 
+    // Count unique combinations
     const countQuery = `
-      SELECT COUNT(*) AS count
-      FROM delegation
-      WHERE ${whereClause}
+      SELECT COUNT(*) AS count FROM (
+        SELECT DISTINCT ON (name, task_description) task_id
+        FROM delegation
+        WHERE ${whereClause}
+      ) AS unique_count
     `;
 
     const [dataRes, countRes] = await Promise.all([
-      pool.query(dataQuery, dataParams),
+      pool.query(paginatedQuery, dataParams),
       pool.query(countQuery, params),
     ]);
 
@@ -123,23 +153,26 @@ export const fetchDelegation = async (
   }
 };
 
-
 export const deleteChecklistTasks = async (tasks) => {
+  // Delete ALL pending tasks matching the same name + task_description
+  // This way, when you delete a unique task, all instances are removed
   for (const t of tasks) {
-    await pool.query(
-      `
-      DELETE FROM checklist
-      WHERE name = $1
-      AND task_description = $2
-      AND submission_date IS NULL
-      `,
-      [t.name, t.task_description]
-    );
+    if (t.name && t.task_description) {
+      await pool.query(
+        `
+        DELETE FROM checklist
+        WHERE name = $1
+        AND task_description = $2
+        AND submission_date IS NULL
+        `,
+        [t.name, t.task_description]
+      );
+    }
   }
 
-  return tasks;
+  // Return the task identifiers that were deleted
+  return tasks.map(t => ({ name: t.name, task_description: t.task_description }));
 };
-
 
 export const deleteDelegationTasks = async (taskIds) => {
   await pool.query(
@@ -153,7 +186,6 @@ export const deleteDelegationTasks = async (taskIds) => {
 
   return taskIds;
 };
-
 
 export const updateChecklistTask = async (updatedTask, originalTask) => {
   try {
@@ -185,7 +217,7 @@ export const updateChecklistTask = async (updatedTask, originalTask) => {
 
       originalTask.department,
       originalTask.name,
-      originalTask.task_description
+      originalTask.task_description,
     ];
 
     const res = await pool.query(sql, values);
